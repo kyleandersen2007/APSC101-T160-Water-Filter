@@ -66,7 +66,7 @@ void onEnter(State s) {
       break;
 
     case STATE_B:
-      Serial.println("ENTER B: Pumping in dirty water + coagulant...");
+      Serial.println("ENTER B: Pumping in dirty water + Alum...");
       c_pump.setSpeed(255);
       p_pump.setSpeed(255);
       break;
@@ -74,19 +74,16 @@ void onEnter(State s) {
     case STATE_C:
       Serial.println("ENTER C: Mixing...");
       motor_mixer.setSpeed(255);
-      motor_mixer.run(FORWARD);
       break;
 
     case STATE_D:
       Serial.println("ENTER D: Pressing...");
       motor_press.setSpeed(255);
-      motor_press.run(FORWARD);
       break;
 
     case STATE_E:
       Serial.println("ENTER E: Pumping out clean water...");
       d_pump.setSpeed(255);
-      d_pump.run(FORWARD);
       break;
 
     case STATE_F:
@@ -111,12 +108,15 @@ void runState(State s) {
       break;
 
     case STATE_C:
+      motor_mixer.run(FORWARD);
       break;
 
     case STATE_D:
+      motor_press.run(FORWARD);
       break;
 
     case STATE_E:
+      d_pump.run(FORWARD);
       break;
 
     case STATE_F: {
@@ -191,7 +191,6 @@ void loop() {
 
   if (!started) {
     if (digitalRead(BUTTON_PIN) == LOW) {
-      Serial.println("Button pressed, starting cycle...");
       started = true;
       currentState = STATE_A;
       previousState = STATE_COUNT;
@@ -231,9 +230,6 @@ void loop() {
         break;
 
       case STATE_F: {
-        float v = read_sensor_2();
-        Serial.print("Final Sensor 2 (V): ");
-        Serial.println(v);
         break;
       }
 
