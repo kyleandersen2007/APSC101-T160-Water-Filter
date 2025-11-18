@@ -1,23 +1,28 @@
 #include <AFMotor.h>
 
-#define BUTTON_PIN 2
+#define START_BUTTON_PIN 50
+#define STOP_BUTTON_PIN 51
+
 #define SENSOR1 A0
 #define SENSOR2 A1
 
-#define P_PUMP_CH 4
 #define C_PUMP_CH 3
-#define D_PUMP_CH 2
+#define D_PUMP_CH 4
 
 #define MIXER_CH 1
 #define PRESS_CH 2
 
+#define RELAY_PIN 53
+
 enum State {
   STATE_A,
   STATE_B,
+  STATE_B_2,
   STATE_C,
   STATE_D,
   STATE_E,
   STATE_F,
+  STATE_G,
   STATE_COUNT
 };
 
@@ -26,20 +31,24 @@ State previousState = STATE_COUNT;
 
 unsigned long stateStart = 0;
 
+// Durations for each state
 unsigned long duration[STATE_COUNT] = {
-  5000,
-  2000,
-  30000,
-  5000,
-  5000,
-  5000
+  10000, // STATE_A: read value
+  10000, // STATE_B: pump clean / coagulant
+  10000, // STATE_B_2: relay / alum etc.
+  10000, // STATE_C: mix part 1
+  10000, // STATE_D: mix part 2
+  10000, // STATE_E: waiting phase
+  12000, // STATE_F: press plate
+  30000  // STATE_G: pump out clean water
 };
 
-const float CLEAN_THRESHOLD = 1.0;
+const float CLEAN_THRESHOLD = 1.0f;  // currently unused, kept for future logic
 
-bool started = false;
+bool started            = false;  // sequence currently running
+bool hasRun             = false;  // has the sequence ever been started?
+bool emergencyStopActive = false; // true after emergency stop
 
-AF_DCMotor p_pump(P_PUMP_CH);
 AF_DCMotor c_pump(C_PUMP_CH);
 AF_DCMotor d_pump(D_PUMP_CH);
 
@@ -59,35 +68,61 @@ float read_sensor_2() {
   return sensor2 * (5.0 / 1024.0);
 }
 
+void stopAllOutputs() {
+  // Generic "everything off" safety function
+  c_pump.setSpeed(0);
+  c_pump.run(RELEASE);
+
+  d_pump.setSpeed(0);
+  d_pump.run(RELEASE);
+
+  motor_mixer.setSpeed(0);
+  motor_mixer.run(RELEASE);
+
+  motor_press.setSpeed(0);
+  motor_press.run(RELEASE);
+
+  digitalWrite(RELAY_PIN, LOW);
+}
+
 void onEnter(State s) {
   switch (s) {
     case STATE_A:
-      Serial.println("ENTER A: Reading Sensor 1 (dirty water level)...");
+      Serial.println("ENTER A: Reading sensor...");
       break;
 
     case STATE_B:
-      Serial.println("ENTER B: Pumping in dirty water + Alum...");
-      c_pump.setSpeed(255);
-      p_pump.setSpeed(255);
+      Serial.println("ENTER B: Coagulant / clean pump...");
+      c_pump.run(FORWARD);
+      break;
+
+    case STATE_B_2:
+      Serial.println("ENTER B_2: Relay ON...");
+      digitalWrite(RELAY_PIN, HIGH);
       break;
 
     case STATE_C:
-      Serial.println("ENTER C: Mixing...");
-      motor_mixer.setSpeed(255);
+      Serial.println("ENTER C: Mixing Part 1...");
+      motor_mixer.run(FORWARD);
       break;
 
     case STATE_D:
-      Serial.println("ENTER D: Pressing...");
-      motor_press.setSpeed(255);
+      Serial.println("ENTER D: Mixing Part 2...");
+      // mixer continues from STATE_C
       break;
 
     case STATE_E:
-      Serial.println("ENTER E: Pumping out clean water...");
-      d_pump.setSpeed(255);
+      Serial.println("ENTER E: Waiting Phase...");
       break;
 
     case STATE_F:
-      Serial.println("ENTER F: Reading Sensor 2 (cleanliness)...");
+      Serial.println("ENTER F: Pressing Phase...");
+      motor_press.run(BACKWARD);
+      break;
+
+    case STATE_G:
+      Serial.println("ENTER G: Pumping out clean water...");
+      d_pump.run(FORWARD);
       break;
 
     default:
@@ -103,28 +138,32 @@ void runState(State s) {
       break;
 
     case STATE_B:
-      c_pump.run(FORWARD);
-      p_pump.run(FORWARD);
+      c_pump.setSpeed(255);
+      break;
+
+    case STATE_B_2:
+      // relay already HIGH in onEnter
       break;
 
     case STATE_C:
-      motor_mixer.run(FORWARD);
+      motor_mixer.setSpeed(255);
       break;
 
     case STATE_D:
-      motor_press.run(FORWARD);
+      motor_mixer.setSpeed(150);
       break;
 
     case STATE_E:
-      d_pump.run(FORWARD);
+      // Waiting phase
       break;
 
-    case STATE_F: {
-      float v = read_sensor_2();
-      Serial.print("Sensor 2 (V): ");
-      Serial.println(v);
+    case STATE_F:
+      motor_press.setSpeed(255);
       break;
-    }
+
+    case STATE_G:
+      d_pump.setSpeed(255);
+      break;
 
     default:
       break;
@@ -140,33 +179,40 @@ void onExit(State s) {
       break;
 
     case STATE_B:
-      Serial.println("EXIT B: Stopping dirty/coagulant pumps");
+      Serial.println("EXIT B: Stopping coagulant pump");
       c_pump.setSpeed(0);
-      p_pump.setSpeed(0);
       c_pump.run(RELEASE);
-      p_pump.run(RELEASE);
+      break;
+
+    case STATE_B_2:
+      Serial.println("EXIT B_2: Relay OFF");
+      digitalWrite(RELAY_PIN, LOW);
       break;
 
     case STATE_C:
-      Serial.println("EXIT C: Stopping mixer");
+      // mixer continues into D
+      break;
+
+    case STATE_D:
+      Serial.println("EXIT D: Stopping mixer");
       motor_mixer.setSpeed(0);
       motor_mixer.run(RELEASE);
       break;
 
-    case STATE_D:
-      Serial.println("EXIT D: Stopping press");
+    case STATE_E:
+      Serial.println("EXIT E");
+      break;
+
+    case STATE_F:
+      Serial.println("EXIT F: Releasing press");
       motor_press.setSpeed(0);
       motor_press.run(RELEASE);
       break;
 
-    case STATE_E:
-      Serial.println("EXIT E: Stopping clean pump");
+    case STATE_G:
+      Serial.println("EXIT G: Stopping clean water pump");
       d_pump.setSpeed(0);
       d_pump.run(RELEASE);
-      break;
-
-    case STATE_F:
-      Serial.println("EXIT F");
       break;
 
     default:
@@ -177,9 +223,11 @@ void onExit(State s) {
 void setup() {
   Serial.begin(9600);
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(START_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(STOP_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, LOW);  // known state
 
-  p_pump.run(RELEASE);
   c_pump.run(RELEASE);
   d_pump.run(RELEASE);
   motor_mixer.run(RELEASE);
@@ -189,17 +237,42 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  if (!started) {
-    if (digitalRead(BUTTON_PIN) == LOW) {
-      started = true;
-      currentState = STATE_A;
-      previousState = STATE_COUNT;
-      stateStart = now;
-      onEnter(currentState);
-    }
+  bool startPressed = (digitalRead(START_BUTTON_PIN) == LOW);
+  bool stopPressed  = (digitalRead(STOP_BUTTON_PIN)  == LOW);
+
+  // If emergency stop has already been triggered, do nothing forever
+  if (emergencyStopActive) {
     return;
   }
 
+  // EMERGENCY STOP: stop button at any time while running
+  if (started && stopPressed) {
+    Serial.println("EMERGENCY STOP (STOP BUTTON) TRIGGERED!");
+    onExit(currentState);    // stop state-specific outputs
+    stopAllOutputs();        // extra safety
+    started = false;
+    emergencyStopActive = true; // block all future runs
+    return;
+  }
+
+  // START SEQUENCE: only if never run before
+  if (!started && !hasRun && startPressed) {
+    Serial.println("START BUTTON PRESSED: Beginning sequence");
+    started = true;
+    hasRun = true;           // prevent any future restarts
+    currentState = STATE_A;
+    previousState = STATE_COUNT;
+    stateStart = now;
+    onEnter(currentState);
+    return;                  // skip rest of loop on the first iteration
+  }
+
+  // If not started, nothing to do
+  if (!started) {
+    return;
+  }
+
+  // Handle state transitions (enter/exit)
   if (currentState != previousState) {
     onExit(previousState);
     onEnter(currentState);
@@ -207,6 +280,7 @@ void loop() {
     stateStart = now;
   }
 
+  // Time-based transitions
   if (now - stateStart >= duration[currentState]) {
     switch (currentState) {
       case STATE_A:
@@ -214,6 +288,10 @@ void loop() {
         break;
 
       case STATE_B:
+        currentState = STATE_B_2;
+        break;
+
+      case STATE_B_2:
         currentState = STATE_C;
         break;
 
@@ -229,14 +307,26 @@ void loop() {
         currentState = STATE_F;
         break;
 
-      case STATE_F: {
+      case STATE_F:
+        currentState = STATE_G;
         break;
-      }
+
+      case STATE_G:
+        // Normal completion: stop everything and do not allow restart
+        Serial.println("SEQUENCE COMPLETE: Stopping system");
+
+        onExit(STATE_G);
+        stopAllOutputs();
+
+        started = false;
+        // hasRun is already true, so no future runs
+        return;
 
       default:
         break;
     }
   }
 
+  // Run current state's behaviour
   runState(currentState);
 }
