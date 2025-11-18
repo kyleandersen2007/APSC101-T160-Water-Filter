@@ -33,21 +33,21 @@ unsigned long stateStart = 0;
 
 // Durations for each state
 unsigned long duration[STATE_COUNT] = {
-  10000, // STATE_A: read value
-  10000, // STATE_B: pump clean / coagulant
-  10000, // STATE_B_2: relay / alum etc.
-  10000, // STATE_C: mix part 1
-  10000, // STATE_D: mix part 2
-  10000, // STATE_E: waiting phase
-  12000, // STATE_F: press plate
-  30000  // STATE_G: pump out clean water
+  10000,  // STATE_A: read value
+  10000,  // STATE_B: pump clean / coagulant
+  10000,  // STATE_B_2: relay / alum etc.
+  10000,  // STATE_C: mix part 1
+  10000,  // STATE_D: mix part 2
+  10000,  // STATE_E: waiting phase
+  12000,  // STATE_F: press plate
+  30000   // STATE_G: pump out clean water
 };
 
 const float CLEAN_THRESHOLD = 1.0f;  // currently unused, kept for future logic
 
-bool started            = false;  // sequence currently running
-bool hasRun             = false;  // has the sequence ever been started?
-bool emergencyStopActive = false; // true after emergency stop
+bool started = false;              // sequence currently running
+bool hasRun = false;               // has the sequence ever been started?
+bool emergencyStopActive = false;  // true after emergency stop
 
 AF_DCMotor c_pump(C_PUMP_CH);
 AF_DCMotor d_pump(D_PUMP_CH);
@@ -190,7 +190,6 @@ void onExit(State s) {
       break;
 
     case STATE_C:
-      // mixer continues into D
       break;
 
     case STATE_D:
@@ -226,7 +225,7 @@ void setup() {
   pinMode(START_BUTTON_PIN, INPUT_PULLUP);
   pinMode(STOP_BUTTON_PIN, INPUT_PULLUP);
   pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, LOW);  // known state
+  digitalWrite(RELAY_PIN, LOW);
 
   c_pump.run(RELEASE);
   d_pump.run(RELEASE);
@@ -238,41 +237,36 @@ void loop() {
   unsigned long now = millis();
 
   bool startPressed = (digitalRead(START_BUTTON_PIN) == LOW);
-  bool stopPressed  = (digitalRead(STOP_BUTTON_PIN)  == LOW);
+  bool stopPressed = (digitalRead(STOP_BUTTON_PIN) == LOW);
 
-  // If emergency stop has already been triggered, do nothing forever
   if (emergencyStopActive) {
     return;
   }
 
-  // EMERGENCY STOP: stop button at any time while running
   if (started && stopPressed) {
     Serial.println("EMERGENCY STOP (STOP BUTTON) TRIGGERED!");
-    onExit(currentState);    // stop state-specific outputs
-    stopAllOutputs();        // extra safety
+    onExit(currentState);
+    stopAllOutputs();
     started = false;
-    emergencyStopActive = true; // block all future runs
+    emergencyStopActive = true;
     return;
   }
 
-  // START SEQUENCE: only if never run before
   if (!started && !hasRun && startPressed) {
     Serial.println("START BUTTON PRESSED: Beginning sequence");
     started = true;
-    hasRun = true;           // prevent any future restarts
+    hasRun = true;
     currentState = STATE_A;
     previousState = STATE_COUNT;
     stateStart = now;
     onEnter(currentState);
-    return;                  // skip rest of loop on the first iteration
+    return;
   }
 
-  // If not started, nothing to do
   if (!started) {
     return;
   }
 
-  // Handle state transitions (enter/exit)
   if (currentState != previousState) {
     onExit(previousState);
     onEnter(currentState);
@@ -280,7 +274,6 @@ void loop() {
     stateStart = now;
   }
 
-  // Time-based transitions
   if (now - stateStart >= duration[currentState]) {
     switch (currentState) {
       case STATE_A:
@@ -312,21 +305,16 @@ void loop() {
         break;
 
       case STATE_G:
-        // Normal completion: stop everything and do not allow restart
-        Serial.println("SEQUENCE COMPLETE: Stopping system");
 
         onExit(STATE_G);
         stopAllOutputs();
 
         started = false;
-        // hasRun is already true, so no future runs
         return;
 
       default:
         break;
     }
   }
-
-  // Run current state's behaviour
   runState(currentState);
 }
