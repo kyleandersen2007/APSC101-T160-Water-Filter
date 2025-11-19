@@ -12,18 +12,29 @@
 #define RELAY_PIN 53
 
 StateMachine::StateMachine()
-  : currentState(STATE_A), previousState(STATE_COUNT), stateStart(0), started(false), hasRun(false),
-    emergencyStopActive(false), c_pump(C_PUMP_CH), d_pump(D_PUMP_CH), motor_mixer(MIXER_CH),
-    motor_press(PRESS_CH), sensor1(0), sensor2(0) {
+  : currentState(STATE_A),
+    previousState(STATE_COUNT),
+    stateStart(0),
+    started(false),
+    hasRun(false),
+    paused(false),
+    pauseStart(0),
+    lastStopPressed(false),
+    c_pump(C_PUMP_CH),
+    d_pump(D_PUMP_CH),
+    motor_mixer(MIXER_CH),
+    motor_press(PRESS_CH),
+    sensor1(0),
+    sensor2(0) {
   duration[STATE_A] = 5000;
   duration[STATE_B] = 20000;
-  duration[STATE_B_2] = 10000;
+  duration[STATE_B_2] = 20000;
   duration[STATE_C] = 10000;
   duration[STATE_D] = 10000;
-  duration[STATE_E] = 10000;
+  duration[STATE_E] = 300000;
   duration[STATE_F] = 14000;
-  duration[STATE_G] = 20000;
-  duration[STATE_H] = 10000;
+  duration[STATE_G] = 15000;
+  duration[STATE_H] = 50000;
 }
 
 void StateMachine::begin() {
@@ -42,27 +53,32 @@ void StateMachine::update() {
   bool startPressed = (digitalRead(START_BUTTON_PIN) == LOW);
   bool stopPressed = (digitalRead(STOP_BUTTON_PIN) == LOW);
 
-  if (emergencyStopActive) return;
-
-  if (started && stopPressed) {
-    onExit(currentState);
-    kill();
-    started = false;
-    emergencyStopActive = true;
-    return;
-  }
-
   if (!started && !hasRun && startPressed) {
     started = true;
     hasRun = true;
+    paused = false;
     currentState = STATE_A;
-    previousState = STATE_COUNT;  // “no previous state”
+    previousState = STATE_COUNT;
     stateStart = now;
-    return;  // let the state-change logic handle onEnter
   }
 
+  if (started && stopPressed && !lastStopPressed) {
+    if (!paused) {
+      paused = true;
+      pauseStart = now;
+      kill();
+    } else {
+      paused = false;
+      unsigned long pausedDuration = now - pauseStart;
+      stateStart += pausedDuration;
+      onEnter(currentState);
+    }
+  }
+
+  lastStopPressed = stopPressed;
 
   if (!started) return;
+  if (paused) return;
 
   if (currentState != previousState) {
     onExit(previousState);
@@ -86,10 +102,10 @@ void StateMachine::update() {
         kill();
         started = false;
         return;
-      default: break;
+      default:
+        break;
     }
   }
-
 
   runState(currentState);
 }
@@ -113,7 +129,6 @@ void StateMachine::kill() {
 }
 
 void StateMachine::onEnter(State s) {
-  Serial.println("Entering new state");
   switch (s) {
     case STATE_A: break;
     case STATE_B: c_pump.forward(); break;
@@ -144,7 +159,6 @@ void StateMachine::runState(State s) {
 }
 
 void StateMachine::onExit(State s) {
-  Serial.println("Exiting state");
   switch (s) {
     case STATE_B: c_pump.kill(); break;
     case STATE_B_2: digitalWrite(RELAY_PIN, LOW); break;
