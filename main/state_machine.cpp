@@ -14,15 +14,16 @@
 StateMachine::StateMachine()
   : currentState(STATE_A), previousState(STATE_COUNT), stateStart(0), started(false), hasRun(false),
     emergencyStopActive(false), c_pump(C_PUMP_CH), d_pump(D_PUMP_CH), motor_mixer(MIXER_CH),
-    motor_press(PRESS_CH), sensor1(0), sensor2(0){
-  duration[STATE_A] = 10000;
-  duration[STATE_B] = 10000;
+    motor_press(PRESS_CH), sensor1(0), sensor2(0) {
+  duration[STATE_A] = 5000;
+  duration[STATE_B] = 20000;
   duration[STATE_B_2] = 10000;
   duration[STATE_C] = 10000;
   duration[STATE_D] = 10000;
   duration[STATE_E] = 10000;
-  duration[STATE_F] = 12000;
-  duration[STATE_G] = 30000;
+  duration[STATE_F] = 14000;
+  duration[STATE_G] = 20000;
+  duration[STATE_H] = 10000;
 }
 
 void StateMachine::begin() {
@@ -55,11 +56,11 @@ void StateMachine::update() {
     started = true;
     hasRun = true;
     currentState = STATE_A;
-    previousState = STATE_COUNT;
+    previousState = STATE_COUNT;  // “no previous state”
     stateStart = now;
-    onEnter(currentState);
-    return;
+    return;  // let the state-change logic handle onEnter
   }
+
 
   if (!started) return;
 
@@ -79,14 +80,16 @@ void StateMachine::update() {
       case STATE_D: currentState = STATE_E; break;
       case STATE_E: currentState = STATE_F; break;
       case STATE_F: currentState = STATE_G; break;
-      case STATE_G:
-        onExit(STATE_G);
+      case STATE_G: currentState = STATE_H; break;
+      case STATE_H:
+        onExit(STATE_H);
         kill();
         started = false;
         return;
       default: break;
     }
   }
+
 
   runState(currentState);
 }
@@ -110,6 +113,7 @@ void StateMachine::kill() {
 }
 
 void StateMachine::onEnter(State s) {
+  Serial.println("Entering new state");
   switch (s) {
     case STATE_A: break;
     case STATE_B: c_pump.forward(); break;
@@ -119,13 +123,14 @@ void StateMachine::onEnter(State s) {
     case STATE_E: break;
     case STATE_F: motor_press.backward(); break;
     case STATE_G: d_pump.forward(); break;
+    case STATE_H: break;
     default: break;
   }
 }
 
 void StateMachine::runState(State s) {
   switch (s) {
-    case STATE_A: read_sensor_1(); break;
+    case STATE_A: Serial.println(read_sensor_1()); break;
     case STATE_B: c_pump.setSpeed(255); break;
     case STATE_B_2: break;
     case STATE_C: motor_mixer.setSpeed(255); break;
@@ -133,17 +138,21 @@ void StateMachine::runState(State s) {
     case STATE_E: break;
     case STATE_F: motor_press.setSpeed(255); break;
     case STATE_G: d_pump.setSpeed(255); break;
+    case STATE_H: Serial.println(read_sensor_2()); break;
     default: break;
   }
 }
 
 void StateMachine::onExit(State s) {
+  Serial.println("Exiting state");
   switch (s) {
     case STATE_B: c_pump.kill(); break;
     case STATE_B_2: digitalWrite(RELAY_PIN, LOW); break;
     case STATE_D: motor_mixer.kill(); break;
+    case STATE_E: break;
     case STATE_F: motor_press.kill(); break;
     case STATE_G: d_pump.kill(); break;
+    case STATE_H: break;
     default: break;
   }
 }

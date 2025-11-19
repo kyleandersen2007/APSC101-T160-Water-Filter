@@ -3,7 +3,18 @@
 
 class StateMachine {
 public:
-  enum State { STATE_A, STATE_B, STATE_B_2, STATE_C, STATE_D, STATE_E, STATE_F, STATE_G, STATE_COUNT };
+  enum State { 
+    STATE_A, 
+    STATE_B, 
+    STATE_B_2, 
+    STATE_C, 
+    STATE_D, 
+    STATE_E, 
+    STATE_F, 
+    STATE_G, 
+    STATE_H,
+    STATE_COUNT 
+  };
   StateMachine();
   void begin();
   void update();
